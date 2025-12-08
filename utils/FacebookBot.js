@@ -1,0 +1,377 @@
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const path = require('path');
+const MessageHandler = require('../events/MessageHandler');
+const config = require('../data/config');
+
+// Enable stealth plugin for anti-detection
+puppeteer.use(StealthPlugin());
+
+class FacebookMessengerBot {
+    constructor() {
+        this.browser = null;
+        this.page = null;
+        this.sessionPath = path.join(__dirname, '../session');
+        this.isRunning = false;
+        this.lastProcessedText = '';
+        this.messageHistory = new Set();
+        this.messageHandler = new MessageHandler(this);
+
+        console.log('🎯 Bot instance created with anti-detection enabled');
+    }
+
+    // Random delay untuk human-like behavior
+    async randomDelay(min = 100, max = 500) {
+        const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+        await this.page.waitForTimeout(delay);
+    }
+
+    // Simulate human reading time
+    async simulateReading(text) {
+        const readingTime = Math.min(text.length * 50, 3000); // Max 3 detik
+        await this.page.waitForTimeout(readingTime);
+    }
+
+    // Random mouse movement
+    async randomMouseMove() {
+        try {
+            const x = Math.floor(Math.random() * 800) + 100;
+            const y = Math.floor(Math.random() * 600) + 100;
+            await this.page.mouse.move(x, y, { steps: 10 });
+        } catch (error) {
+            // Ignore mouse move errors
+        }
+    }
+
+    async init() {
+        console.log('Memulai bot Facebook Messenger...');
+        console.log('🛡️  Anti-detection: ENABLED');
+
+        this.browser = await puppeteer.launch({
+            headless: config.headless,
+            userDataDir: this.sessionPath,
+            args: config.puppeteerArgs,
+            ignoreDefaultArgs: ['--enable-automation'],
+            defaultViewport: null
+        });
+
+        const pages = await this.browser.pages();
+        this.page = pages[0] || await this.browser.newPage();
+
+        // Set viewport
+        await this.page.setViewport(config.viewport);
+
+        // Set realistic user agent
+        await this.page.setUserAgent(config.userAgent);
+
+        // Additional anti-detection measures
+        await this.page.evaluateOnNewDocument(() => {
+            // Override navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+
+            // Mock plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+
+            // Mock languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en', 'id']
+            });
+
+            // Chrome runtime
+            window.chrome = {
+                runtime: {}
+            };
+
+            // Permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        });
+
+        console.log('Membuka Facebook...');
+        await this.page.goto('https://www.facebook.com/messages', {
+            waitUntil: 'networkidle2',
+            timeout: 60000
+        });
+
+        await this.randomDelay(2000, 4000);
+        await this.randomMouseMove();
+
+        const isLoggedIn = await this.checkLogin();
+
+        if (!isLoggedIn) {
+            console.log('Silakan login secara manual...');
+            console.log('Bot akan menunggu hingga kamu login...');
+            await this.waitForLogin();
+        }
+
+        console.log('Login berhasil! Bot siap berjalan.');
+        console.log('Bot aktif, menunggu pesan...\n');
+        this.isRunning = true;
+        await this.startListening();
+    }
+
+    async checkLogin() {
+        try {
+            const selectors = config.loginSelectors;
+            console.log('🔍 Mencoba mendeteksi login...');
+
+            for (const selector of selectors) {
+                try {
+                    await this.page.waitForSelector(selector, { timeout: 3000 });
+                    console.log(`✅ Login terdeteksi dengan selector: ${selector}`);
+                    return true;
+                } catch {
+                    console.log(`❌ Selector tidak ditemukan: ${selector}`);
+                }
+            }
+
+            console.log('⚠️  Semua selector gagal, coba lagi...');
+            return false;
+        } catch {
+            return false;
+        }
+    }
+
+    async waitForLogin() {
+        let attempts = 0;
+        while (true) {
+            await this.page.waitForTimeout(5000);
+
+            const currentUrl = this.page.url();
+            console.log(`🔍 Current URL: ${currentUrl}`);
+
+            if (currentUrl.includes('/messages') && !currentUrl.includes('/login')) {
+                console.log('✅ Terdeteksi sudah login berdasarkan URL');
+                break;
+            }
+
+            const loggedIn = await this.checkLogin();
+            if (loggedIn) break;
+
+            attempts++;
+            console.log(`⏳ Menunggu login... (percobaan ${attempts})`);
+
+            if (attempts > 20) {
+                console.log('⚠️  Timeout menunggu login, melanjutkan...');
+                break;
+            }
+        }
+    }
+
+    async startListening() {
+        while (this.isRunning) {
+            try {
+                await this.checkNewMessages();
+                await this.randomDelay(config.checkInterval - 200, config.checkInterval + 500);
+
+                // Occasional random mouse movement
+                if (Math.random() < 0.1) {
+                    await this.randomMouseMove();
+                }
+            } catch (error) {
+                console.error('⚠️ Error di startListening:', error.message);
+            }
+        }
+    }
+
+    async checkNewMessages() {
+        try {
+            const messages = await this.page.evaluate(() => {
+                const results = [];
+
+                // Method 1: Check role="row" containers
+                const msgContainers = document.querySelectorAll('[role="row"]');
+                msgContainers.forEach((container) => {
+                    const textDivs = container.querySelectorAll('div[dir="auto"]');
+                    textDivs.forEach((div) => {
+                        const text = div.textContent.trim();
+                        if (text && text.length > 0 && text.length < 500) {
+                            const rect = container.getBoundingClientRect();
+                            const isFromOther = rect.left < window.innerWidth / 2;
+
+                            results.push({
+                                text: text,
+                                isFromOther: isFromOther,
+                                timestamp: Date.now(),
+                                method: 'role-row'
+                            });
+                        }
+                    });
+                });
+
+                // Method 2: Check message bubbles
+                const bubbles = document.querySelectorAll('[data-scope="messages_table"]');
+                bubbles.forEach((bubble) => {
+                    const textSpans = bubble.querySelectorAll('span[dir="auto"]');
+                    textSpans.forEach((span) => {
+                        const text = span.textContent.trim();
+                        if (text && text.length > 0 && text.length < 500) {
+                            const rect = bubble.getBoundingClientRect();
+                            const isFromOther = rect.left < window.innerWidth / 2;
+
+                            results.push({
+                                text: text,
+                                isFromOther: isFromOther,
+                                timestamp: Date.now(),
+                                method: 'bubble'
+                            });
+                        }
+                    });
+                });
+
+                return results;
+            });
+
+            const otherMessages = messages.filter(m => m.isFromOther);
+
+            if (otherMessages.length > 0) {
+                const lastMsg = otherMessages[otherMessages.length - 1];
+
+                if (!this.messageHistory.has(lastMsg.text) &&
+                    lastMsg.text !== this.lastProcessedText) {
+
+                    console.log(`\n[${new Date().toLocaleTimeString()}] 📩 Pesan baru: ${lastMsg.text}`);
+                    console.log(`   Detected via: ${lastMsg.method}`);
+
+                    this.lastProcessedText = lastMsg.text;
+                    this.messageHistory.add(lastMsg.text);
+
+                    if (this.messageHistory.size > 100) {
+                        this.messageHistory.clear();
+                    }
+
+                    // Simulate reading time
+                    await this.simulateReading(lastMsg.text);
+
+                    // Random delay before processing
+                    await this.randomDelay(500, 1500);
+
+                    await this.messageHandler.handleMessage(lastMsg.text);
+                }
+            }
+
+        } catch (error) {
+            console.error('⚠️ Error checkNewMessages:', error.message);
+        }
+    }
+
+    async sendMessage(text) {
+        console.log('\n' + '='.repeat(60));
+        console.log('🚀 SEND MESSAGE DIPANGGIL!');
+        console.log('📝 Text:', text);
+        console.log('📝 Text length:', text.length);
+        console.log('='.repeat(60));
+
+        try {
+            // Human-like delay before responding
+            await this.randomDelay(800, 2000);
+
+            // Cek semua input field yang ada
+            console.log('\n🔍 Mencari input field...');
+            const availableInputs = await this.page.evaluate(() => {
+                const inputs = [];
+
+                // Cari semua contenteditable
+                document.querySelectorAll('[contenteditable="true"]').forEach((el, idx) => {
+                    inputs.push({
+                        index: idx,
+                        selector: 'contenteditable',
+                        role: el.getAttribute('role'),
+                        ariaLabel: el.getAttribute('aria-label'),
+                        visible: el.offsetParent !== null
+                    });
+                });
+
+                return inputs;
+            });
+
+            console.log('📋 Input fields ditemukan:', availableInputs.length);
+            availableInputs.forEach(inp => {
+                console.log(`  - [${inp.index}] role="${inp.role}" aria-label="${inp.ariaLabel}" visible=${inp.visible}`);
+            });
+
+            const inputSelectors = config.inputSelectors;
+            let messageSent = false;
+
+            for (const selector of inputSelectors) {
+                try {
+                    console.log(`\n🎯 Mencoba selector: ${selector}`);
+
+                    const element = await this.page.$(selector);
+
+                    if (element) {
+                        console.log(`✅ Element ditemukan!`);
+
+                        // Simulate mouse movement to input
+                        await this.randomMouseMove();
+                        await this.randomDelay(100, 300);
+
+                        // Focus ke input
+                        await element.click();
+                        await this.randomDelay(300, 600);
+
+                        console.log('⚡ Mengirim text INSTANT (tanpa typing)...');
+
+                        // Insert text langsung tanpa typing animation
+                        await this.page.evaluate((sel, txt) => {
+                            const inp = document.querySelector(sel);
+                            if (inp) {
+                                inp.textContent = '';
+                                inp.innerHTML = '';
+                                inp.textContent = txt;
+                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        }, selector, text);
+
+                        await this.randomDelay(300, 700);
+
+                        console.log('✉️  Menekan Enter...');
+                        await this.page.keyboard.press('Enter');
+                        await this.randomDelay(800, 1500);
+
+                        console.log(`✅ BERHASIL KIRIM!`);
+                        console.log(`📤 Terkirim: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
+                        console.log('='.repeat(60) + '\n');
+
+                        messageSent = true;
+                        return;
+                    } else {
+                        console.log(`❌ Element null`);
+                    }
+                } catch (err) {
+                    console.log(`❌ Error: ${err.message}`);
+                }
+            }
+
+            if (!messageSent) {
+                console.log('\n❌ GAGAL KIRIM - Tidak ada selector yang bekerja!');
+                console.log('💡 Solusi:');
+                console.log('   1. Pastikan chat sudah terbuka di Facebook Messenger');
+                console.log('   2. Coba klik manual ke input field di browser');
+                console.log('   3. Periksa selector di config.js\n');
+            }
+
+        } catch (error) {
+            console.error('❌ FATAL ERROR sendMessage:', error);
+        }
+    }
+
+    async stop() {
+        this.isRunning = false;
+        if (this.browser) {
+            await this.browser.close();
+        }
+        console.log('Bot dihentikan.');
+    }
+}
+
+module.exports = FacebookMessengerBot;
+

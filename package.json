@@ -1,0 +1,23 @@
+{
+    "name": "yusa-bot",
+    "version": "1.0.0",
+    "description": "Facebook Bot by Yusa",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "login": "node gets.js"
+    },
+    "keywords": [
+        "facebook",
+        "bot",
+        "yusa"
+    ],
+    "author": "Yusa - https://www.facebook.com/profile.php?id=100092284524491",
+    "license": "MIT",
+    "dependencies": {
+        "fs-extra": "^11.1.1",
+        "puppeteer": "^21.5.2",
+        "puppeteer-extra": "^3.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2"
+    }
+}
